@@ -13,13 +13,13 @@ variable "owner" {
 variable "github_owner" {
   description = "GitHub user or organisation that owns the pulse repository (used in the OIDC sub claims)."
   type        = string
-  default     = "YOUR_GITHUB_USER"
+  default     = "arham3117"
 }
 
 variable "github_repo" {
-  description = "Name of the application/infra repository."
+  description = "Name of the application/infra repository. Case matters: GitHub puts the exact name in the OIDC sub claim and IAM compares it case-sensitively."
   type        = string
-  default     = "pulse"
+  default     = "Pulse"
 }
 
 variable "ecr_repository_name" {

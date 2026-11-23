@@ -21,7 +21,7 @@ MAX_REDIRECTS = 3
 MAX_BODY_BYTES = 1024 * 1024  # read at most 1 MB when looking for a keyword
 MAX_ERROR_LEN = 500
 REDIRECT_CODES = frozenset({301, 302, 303, 307, 308})
-USER_AGENT = "PulseMonitor/1.0 (+https://github.com/YOUR_GITHUB_USER/pulse)"
+USER_AGENT = "PulseMonitor/1.0 (+https://github.com/arham3117/Pulse)"
 
 
 @dataclass(frozen=True, slots=True)

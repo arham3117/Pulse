@@ -46,7 +46,7 @@ tfvars differ). Change both together.
 | `ACCOUNT_ID` | `envs/*/backend.tf` (bucket `pulse-tfstate-ACCOUNT_ID`), commented block in `bootstrap/versions.tf` |
 | `YOUR_IP/32` | `envs/*/*.tfvars` `admin_cidrs` (plan fails until it is a valid CIDR) |
 | `YOUR_NAME` | `envs/*/*.tfvars` `owner`, `bootstrap` var `owner` |
-| `YOUR_GITHUB_USER` | `bootstrap` var `github_owner` (OIDC `sub` claims) |
+| _(filled in)_ | `bootstrap` vars `github_owner = "arham3117"`, `github_repo = "Pulse"` (OIDC `sub` claims; the repo name is case-sensitive) |
 | `us-east-2` | tfvars + backend blocks, if you use another region |
 
 ## Apply order

@@ -1,7 +1,7 @@
 # Runbooks
 
 One runbook per alert, named after the alert. Each alert's `runbook_url` annotation points to
-`https://github.com/YOUR_GITHUB_USER/pulse/blob/main/docs/runbooks/<AlertName>.md`.
+`https://github.com/arham3117/Pulse/blob/main/docs/runbooks/<AlertName>.md`.
 Format: [Appendix D of the plan](../../plan/plan.md#appendix-d-runbook-template-docsrunbooksalertnamemd).
 
 ## Alert runbooks

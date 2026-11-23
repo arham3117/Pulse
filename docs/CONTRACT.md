@@ -8,9 +8,11 @@ must agree on. If you change a name here, change it everywhere.
 
 ## Placeholders (replace before first use)
 
+GitHub is filled in: app repo `arham3117/Pulse` (capital P: GitHub puts the exact name in the
+OIDC `sub` claim and IAM compares it case-sensitively), GitOps repo `arham3117/pulse-gitops`.
+
 | Placeholder | Meaning | Where |
 |---|---|---|
-| `YOUR_GITHUB_USER` | GitHub owner of `pulse` and `pulse-gitops` | workflows, OIDC trust, runbook URLs, User-Agent |
 | `YOUR_NAME` | `Owner` tag value | `infra/envs/*/*.tfvars` |
 | `us-east-2` | AWS region (default; change in tfvars + CLAUDE.md) | tfvars, backend blocks |
 | `ACCOUNT_ID` | 12-digit AWS account id | backend bucket name `pulse-tfstate-ACCOUNT_ID` |
@@ -127,5 +129,5 @@ Terraform outputs used by the script (same names in both envs): `region`, `clust
 `PulseAPIHighErrorRate`, `PulseAPIHighLatency`, `PulseCheckBacklog`, `PulseChecksStalled`,
 `PulseScheduleLagHigh`, `PulseDLQNotEmpty`, `PulseSchedulerDown`, `PulsePodCrashLooping`,
 `PulseSLOFastBurn`, `PulseSLOSlowBurn`.
-Runbook URL: `https://github.com/YOUR_GITHUB_USER/pulse/blob/main/docs/runbooks/<AlertName>.md`.
+Runbook URL: `https://github.com/arham3117/Pulse/blob/main/docs/runbooks/<AlertName>.md`.
 Prometheus scrape job names: `pulse-api`, `pulse-scheduler`, `pulse-worker`.

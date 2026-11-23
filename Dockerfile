@@ -25,7 +25,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 FROM ${PYTHON_IMAGE} AS runtime
 LABEL org.opencontainers.image.title="pulse" \
       org.opencontainers.image.description="Pulse uptime monitoring (api, scheduler, worker, target, maintenance)" \
-      org.opencontainers.image.source="https://github.com/YOUR_GITHUB_USER/pulse"
+      org.opencontainers.image.source="https://github.com/arham3117/Pulse"
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PATH="/app/.venv/bin:${PATH}"

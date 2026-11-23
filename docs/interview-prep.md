@@ -55,8 +55,8 @@ numbers from your drills, load tests and cost data once you have them. Aim for 1
 - GitHub's OIDC provider issues a signed token per job (`id-token: write`).
 - `aws-actions/configure-aws-credentials` exchanges it via `sts:AssumeRoleWithWebIdentity`.
 - Role trust policy checks `aud = sts.amazonaws.com` and a narrow `sub`: for example
-  `repo:YOUR_GITHUB_USER/pulse:ref:refs/heads/main` for ECR push,
-  `repo:YOUR_GITHUB_USER/pulse:environment:prod` for apply. Never a wildcard repo.
+  `repo:arham3117/Pulse:ref:refs/heads/main` for ECR push,
+  `repo:arham3117/Pulse:environment:prod` for apply. Never a wildcard repo.
 - Credentials are short-lived; nothing to leak or rotate. Separate roles for push, plan, apply.
 
 ## 6. Why pin GitHub Actions to commit SHAs?

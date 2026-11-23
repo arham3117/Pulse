@@ -69,7 +69,7 @@ make down                # stop and delete volumes
 
 > ⚠️ **Cost**: EKS, NAT gateway, EC2 nodes, RDS and the ALB bill **by the hour, even when idle**. Run dev only while you work and finish every session with `make infra-down ENV=dev`. Read plan section 7 first.
 
-1. **Replace the placeholders** (search the repo): `YOUR_GITHUB_USER`, `YOUR_NAME`, `ACCOUNT_ID` (backend bucket), `YOUR_IP/32` (EKS API allow-list), and the budget email variable. The region is `us-east-2`; change it in `infra/envs/*/*.tfvars`, the backend blocks and `CLAUDE.md` if you prefer another.
+1. **Replace the placeholders** (search the repo): `YOUR_NAME`, `ACCOUNT_ID` (backend bucket), `YOUR_IP/32` (EKS API allow-list), and the budget email variable. The region is `us-east-2`; change it in `infra/envs/*/*.tfvars`, the backend blocks and `CLAUDE.md` if you prefer another.
 2. `aws configure sso` → profile `pulse` (the Makefile uses `AWS_PROFILE=pulse` for infra targets only).
 3. Apply `infra/bootstrap` once by hand, then migrate its state. See [infra/README.md](infra/README.md).
 4. Create the GitHub repository variables, secret, environments and GitHub App listed under [CI setup](#ci-setup) below.
