@@ -1,0 +1,139 @@
+# Local Pulse stack: `make up && make seed`, then open http://localhost:8000
+# Everything here is local-only; credentials below are throwaway dev values.
+
+x-pulse-env: &pulse-env
+  PULSE_ENV: local
+  PULSE_LOG_LEVEL: INFO
+  PULSE_DB_HOST: postgres
+  PULSE_DB_PORT: "5432"
+  PULSE_DB_NAME: pulse
+  PULSE_DB_USER: postgres
+  PULSE_DB_PASSWORD: postgres
+  PULSE_DB_SSLMODE: disable
+  PULSE_AWS_REGION: us-east-2
+  PULSE_SQS_ENDPOINT_URL: http://elasticmq:9324
+  PULSE_SQS_QUEUE_URL: http://elasticmq:9324/000000000000/pulse-local-checks
+  PULSE_SQS_DLQ_URL: http://elasticmq:9324/000000000000/pulse-local-checks-dlq
+  PULSE_ALLOW_PRIVATE_HOSTS: target
+  PULSE_ADMIN_API_KEY: local-dev-key
+  # Set PULSE_ALERT_WEBHOOK_URL in your shell to send real Slack/Discord messages;
+  # empty means notifications are logged (LogNotifier).
+  PULSE_ALERT_WEBHOOK_URL: ${PULSE_ALERT_WEBHOOK_URL:-}
+
+x-pulse-app: &pulse-app
+  image: pulse:local
+  build:
+    context: .
+  read_only: true
+  tmpfs: [/tmp]
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: [ALL]
+  environment: *pulse-env
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: pulse
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    # Host port 5433 so it does not clash with a Postgres installed on the host.
+    ports: ["${PULSE_LOCAL_PG_PORT:-5433}:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d pulse"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  elasticmq:
+    image: softwaremill/elasticmq-native:1.7.1
+    ports: ["9324:9324"]
+    volumes:
+      - ./local/elasticmq.conf:/opt/elasticmq.conf:ro
+    healthcheck:
+      # Port open = ready (ElasticMQ creates the queues from the config before binding).
+      test: ["CMD", "nc", "-z", "localhost", "9324"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 3s
+
+  migrate:
+    <<: *pulse-app
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  api:
+    <<: *pulse-app
+    command: ["pulse-api"]
+    ports: ["8000:8000"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/readyz', timeout=2).status == 200 else 1)"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  scheduler:
+    <<: *pulse-app
+    command: ["pulse-scheduler"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      elasticmq: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:9100/readyz', timeout=2).status == 200 else 1)"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  worker:
+    <<: *pulse-app
+    command: ["pulse-worker"]
+    deploy:
+      replicas: 2
+    stop_grace_period: 30s
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      elasticmq: { condition: service_healthy }
+      target: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:9100/readyz', timeout=2).status == 200 else 1)"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  target:
+    <<: *pulse-app
+    command: ["pulse-target"]
+    # Host port 18080 (8080 is often taken); inside the network it is target:8080.
+    ports: ["${PULSE_LOCAL_TARGET_PORT:-18080}:8080"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8080/healthz', timeout=2).status == 200 else 1)"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  prometheus:
+    image: prom/prometheus:v3.8.0
+    ports: ["9090:9090"]
+    volumes:
+      - ./local/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      api: { condition: service_healthy }
+
+  grafana:
+    image: grafana/grafana:12.3.0
+    profiles: [grafana]  # optional: `docker compose --profile grafana up -d`
+    ports: ["3000:3000"]
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+    depends_on: [prometheus]
+
+volumes:
+  pgdata:

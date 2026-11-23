@@ -1,0 +1,261 @@
+# Infra CI for pull requests touching infra/**: fmt, validate, tflint, checkov, and a
+# read-only plan for dev and prod posted as ONE PR comment that is updated on every push.
+#
+# - Never pull_request_target. Fork PRs get every check except the plan (no OIDC for forks).
+# - The plan role (pulse-ci-tf-plan) is read-only, so plans run with -lock=false.
+# - The plan jobs have id-token but no PR write; the comment job has PR write but no AWS access.
+name: infra-ci
+
+on:
+  pull_request:
+    paths:
+      - "infra/**"
+      - ".github/workflows/infra-ci.yml"
+
+permissions: {}
+
+concurrency:
+  group: infra-ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  TF_VERSION: "1.17.2"
+  TFLINT_VERSION: "v0.66.0"
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+  PLAN_COMMENT_MARKER: "<!-- pulse-infra-plan -->"
+
+jobs:
+  fmt:
+    name: terraform fmt
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      - name: terraform fmt -check
+        run: terraform fmt -check -recursive -diff infra
+
+  validate:
+    name: validate (${{ matrix.root }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        root: [infra/bootstrap, infra/envs/dev, infra/envs/prod]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      - name: init (no backend) + validate
+        working-directory: ${{ matrix.root }}
+        run: |
+          terraform init -backend=false
+          terraform validate -no-color
+
+  tflint:
+    name: tflint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.tflint.d/plugins
+          key: tflint-${{ runner.os }}-${{ hashFiles('**/.tflint.hcl') }}
+      - uses: terraform-linters/setup-tflint@6ffdbaa3be476b3431f7275c26966ef32ff60337 # v6.3.2
+        with:
+          tflint_version: ${{ env.TFLINT_VERSION }}
+      - name: tflint
+        working-directory: infra
+        env:
+          # Avoids GitHub API rate limits while downloading plugins.
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          config_args=()
+          if [ -f .tflint.hcl ]; then
+            config_args=(--config "$PWD/.tflint.hcl")
+          fi
+          tflint --init "${config_args[@]}"
+          tflint --recursive --format compact "${config_args[@]}"
+
+  checkov:
+    name: checkov
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write # upload Checkov SARIF to code scanning
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: checkov
+        uses: bridgecrewio/checkov-action@b17b606d6ec72bb8ba5721ad5b7e340b80a9fc39 # v12.3142.0
+        with:
+          directory: infra
+          framework: terraform
+          quiet: true
+          output_format: cli,sarif
+          output_file_path: console,checkov.sarif
+      - name: Upload Checkov SARIF
+        if: always() && hashFiles('checkov.sarif') != ''
+        uses: github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+        with:
+          sarif_file: checkov.sarif
+          category: checkov
+
+  plan:
+    name: plan (${{ matrix.env }})
+    # OIDC tokens are not issued to fork PRs; skip the plan there instead of failing.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    needs: [fmt, validate]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write # OIDC → pulse-ci-tf-plan (read-only)
+    strategy:
+      fail-fast: false
+      matrix:
+        env: [dev, prod]
+    defaults:
+      run:
+        working-directory: infra/envs/${{ matrix.env }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_TF_PLAN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: pulse-infra-ci-${{ github.run_id }}
+      - name: terraform plan
+        id: plan
+        env:
+          TF_ENV: ${{ matrix.env }}
+        run: |
+          set +e
+          out="$RUNNER_TEMP/plan-$TF_ENV"
+          mkdir -p "$out"
+          {
+            terraform init -no-color &&
+            terraform plan -no-color -lock=false -detailed-exitcode \
+              -var-file="$TF_ENV.tfvars" -out=tfplan
+          } > "$out/plan.log" 2>&1
+          code=$?
+          # 0 = no changes, 2 = changes, anything else = error
+          case "$code" in
+            0) status="no changes" ;;
+            2) status="changes" ;;
+            *) status="error" ;;
+          esac
+          if [ "$status" != "error" ]; then
+            terraform show -no-color tfplan > "$out/plan.txt" 2>&1
+          else
+            cp "$out/plan.log" "$out/plan.txt"
+          fi
+          echo "$status" > "$out/status"
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Terraform plan: $TF_ENV ($status)"
+            echo '```'
+            head -c 60000 "$out/plan.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 0
+      - name: Upload plan output
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: plan-${{ matrix.env }}
+          path: ${{ runner.temp }}/plan-${{ matrix.env }}/
+          retention-days: 14
+      - name: Fail on plan error
+        if: steps.plan.outputs.status == 'error'
+        env:
+          TF_ENV: ${{ matrix.env }}
+        run: |
+          echo "::error::terraform plan failed for $TF_ENV; see the plan-$TF_ENV artifact."
+          exit 1
+
+  comment:
+    name: plan comment
+    needs: [plan]
+    if: always() && needs.plan.result != 'skipped'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write # create/update the single plan comment
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: plan-*
+          path: plans
+      - name: Create or update PR comment
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          MARKER: ${{ env.PLAN_COMMENT_MARKER }}
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const marker = process.env.MARKER;
+            const MAX_PER_ENV = 25000; // GitHub comments cap at 65536 chars
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const icons = { 'no changes': '✅', changes: '📝', error: '❌' };
+
+            let body = `${marker}\n## Terraform plan\n\n`;
+            body += `Commit \`${context.payload.pull_request.head.sha.slice(0, 7)}\` · [workflow run and full plan artifacts](${runUrl})\n\n`;
+            for (const env of ['dev', 'prod']) {
+              const dir = path.join('plans', `plan-${env}`);
+              if (!fs.existsSync(dir)) {
+                body += `### ${env}: ⚠️ no plan output (job failed before planning)\n\n`;
+                continue;
+              }
+              const status = fs.readFileSync(path.join(dir, 'status'), 'utf8').trim();
+              let text = fs.readFileSync(path.join(dir, 'plan.txt'), 'utf8');
+              let note = '';
+              if (text.length > MAX_PER_ENV) {
+                text = text.slice(text.length - MAX_PER_ENV);
+                note = `\n_Truncated to the last ${MAX_PER_ENV} characters. Download the \`plan-${env}\` artifact for the full plan._\n`;
+              }
+              const summary = (text.match(/^Plan: .*$/m) || text.match(/^No changes\..*$/m) || [''])[0];
+              body += `### ${env}: ${icons[status] || '❔'} ${status}${summary ? ` (${summary})` : ''}\n`;
+              body += `<details><summary>Show plan</summary>\n\n\`\`\`terraform\n${text}\n\`\`\`\n${note}</details>\n\n`;
+            }
+
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number, per_page: 100 });
+            const existing = comments.find(c => c.user?.type === 'Bot' && c.body?.startsWith(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+              core.info(`Updated comment ${existing.id}`);
+            } else {
+              const { data } = await github.rest.issues.createComment({ owner, repo, issue_number, body });
+              core.info(`Created comment ${data.id}`);
+            }

@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}{{ m.name }} · Pulse status{% endblock %}
+{% macro pct(v) %}{% if v is none %}–{% else %}{{ "%.2f" | format(v) }}%{% endif %}{% endmacro %}
+{% macro num(v) %}{% if v is none %}–{% else %}{{ v | round | int }} ms{% endif %}{% endmacro %}
+{% block content %}
+<p><a href="/">← All monitors</a></p>
+<h1><span class="dot {{ m.status }}"></span> {{ m.name }} <span class="status-label {{ m.status }}">{{ m.status }}</span></h1>
+<p class="muted">{{ m.method }} · every {{ m.interval_seconds }}s · timeout {{ m.timeout_ms }} ms ·
+  {% if m.last_checked_at %}last checked {{ m.last_checked_at.strftime('%Y-%m-%d %H:%M:%S') }}{% else %}not checked yet{% endif %}</p>
+
+<dl class="facts">
+  <div><dt>Uptime 24h</dt><dd>{{ pct(s.stats.uptime_24h) }}</dd></div>
+  <div><dt>7d</dt><dd>{{ pct(s.stats.uptime_7d) }}</dd></div>
+  <div><dt>30d</dt><dd>{{ pct(s.stats.uptime_30d) }}</dd></div>
+  <div><dt>Avg (24h)</dt><dd>{{ num(s.stats.avg_response_ms_24h) }}</dd></div>
+  <div><dt>p95 (24h)</dt><dd>{{ num(s.stats.p95_response_ms_24h) }}</dd></div>
+  <div><dt>TLS</dt><dd>{% if tls_days is none %}–{% else %}{{ tls_days }} days{% endif %}</dd></div>
+</dl>
+
+<h2>Response time, last 24 hours</h2>
+{% if points %}
+<figure class="chart">
+  <svg viewBox="0 0 800 170" preserveAspectRatio="none" role="img" aria-label="Response time chart">
+    <line x1="0" y1="160" x2="800" y2="160" class="axis"/>
+    <polyline points="{{ points }}" class="line"/>
+    <text x="4" y="12" class="label">{{ max_ms }} ms</text>
+    <text x="4" y="168" class="label">24h ago</text>
+    <text x="796" y="168" class="label" text-anchor="end">now</text>
+  </svg>
+</figure>
+{% else %}
+<p class="muted">No successful checks with timing data in the last 24 hours.</p>
+{% endif %}
+
+<h2>Incidents</h2>
+{% if incidents %}
+<table class="incidents">
+  <thead><tr><th>Started</th><th>Resolved</th><th>Duration</th><th>First error</th></tr></thead>
+  <tbody>
+  {% for i in incidents %}
+    <tr>
+      <td>{{ i.started_at.strftime('%Y-%m-%d %H:%M') }}</td>
+      <td>{% if i.resolved_at %}{{ i.resolved_at.strftime('%Y-%m-%d %H:%M') }}{% else %}<strong class="down">ongoing</strong>{% endif %}</td>
+      <td>{% set end = i.resolved_at or now %}{{ ((end - i.started_at).total_seconds() // 60) | int }} min</td>
+      <td>{{ i.first_error }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No incidents recorded.</p>
+{% endif %}
+{% endblock %}

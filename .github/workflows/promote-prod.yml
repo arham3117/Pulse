@@ -1,0 +1,191 @@
+# Manual promotion of an already-built, already-scanned image tag to prod.
+#
+# verify  (no environment, pulse-ci-ecr-push): the tag exists in ECR and its ECR scan has no
+#         CRITICAL findings. Defaults to the tag currently deployed to dev.
+# promote (environment: prod → waits for approval; no AWS access): bumps envs/prod/values.yaml
+#         in pulse-gitops; Argo CD does the rest.
+name: promote-prod
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Image tag to promote (sha-xxxxxxx). Leave empty to use the tag currently in envs/dev/values.yaml."
+        type: string
+        required: false
+        default: ""
+
+permissions: {}
+
+concurrency:
+  group: promote-prod
+  cancel-in-progress: false
+
+env:
+  ECR_REPOSITORY: pulse
+  GITOPS_REPO: pulse-gitops
+  YQ_VERSION: "v4.54.3"
+  YQ_SHA256: "129534601871538efe0ba4c5e62a34fb1d5f469bcb975c4fddeb467d82974973"
+
+jobs:
+  verify:
+    name: verify
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      id-token: write # OIDC → pulse-ci-ecr-push (can describe images and scan findings)
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+    steps:
+      - name: Mint GitHub App token (read pulse-gitops)
+        id: app-token
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
+        with:
+          app-id: ${{ vars.GITOPS_APP_ID }}
+          private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ env.GITOPS_REPO }}
+          permission-contents: read
+
+      - name: Check out pulse-gitops
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.repository_owner }}/${{ env.GITOPS_REPO }}
+          token: ${{ steps.app-token.outputs.token }}
+          path: gitops
+          persist-credentials: false
+
+      - name: Install yq (pinned, checksum-verified)
+        run: |
+          set -euo pipefail
+          curl -fsSL -o "$RUNNER_TEMP/yq" \
+            "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
+          echo "${YQ_SHA256}  $RUNNER_TEMP/yq" | sha256sum --check --strict
+          chmod +x "$RUNNER_TEMP/yq"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: Resolve and validate tag
+        id: resolve
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          tag="$INPUT_TAG"
+          if [ -z "$tag" ]; then
+            tag="$(yq '.image.tag' gitops/envs/dev/values.yaml)"
+            echo "No tag given; using dev's current tag: $tag"
+          fi
+          if ! [[ "$tag" =~ ^sha-[0-9a-f]{7}$ ]]; then
+            echo "::error::Tag must look like sha-xxxxxxx (7 hex chars)"
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ECR_PUSH }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: pulse-promote-verify-${{ github.run_id }}
+
+      - name: Tag exists in ECR and has no CRITICAL findings
+        env:
+          TAG: ${{ steps.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if ! aws ecr describe-images --repository-name "$ECR_REPOSITORY" \
+               --image-ids imageTag="$TAG" --output json > image.json; then
+            echo "::error::$ECR_REPOSITORY:$TAG not found in ECR"
+            exit 1
+          fi
+          digest="$(jq -r '.imageDetails[0].imageDigest' image.json)"
+          status="$(aws ecr describe-image-scan-findings --repository-name "$ECR_REPOSITORY" \
+                      --image-id imageTag="$TAG" --query 'imageScanStatus.status' --output text || echo MISSING)"
+          if [ "$status" != "COMPLETE" ] && [ "$status" != "ACTIVE" ]; then
+            echo "::error::ECR scan status for $TAG is '$status'; refusing to promote an unscanned image"
+            exit 1
+          fi
+          critical="$(aws ecr describe-image-scan-findings --repository-name "$ECR_REPOSITORY" \
+                        --image-id imageTag="$TAG" \
+                        --query 'imageScanFindings.findingSeverityCounts.CRITICAL' --output text)"
+          [ "$critical" = "None" ] && critical=0
+          {
+            echo "## Promotion candidate"
+            echo "- Tag: \`$TAG\`"
+            echo "- Digest: \`$digest\`"
+            echo "- ECR scan: $status, CRITICAL findings: $critical"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$critical" -gt 0 ]; then
+            echo "::error::$TAG has $critical CRITICAL findings in ECR scan"
+            exit 1
+          fi
+
+  promote:
+    name: promote
+    needs: [verify]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: prod
+    permissions: {} # writes go through the GitHub App token, scoped to pulse-gitops only
+    steps:
+      - name: Mint GitHub App token (pulse-gitops only)
+        id: app-token
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
+        with:
+          app-id: ${{ vars.GITOPS_APP_ID }}
+          private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ env.GITOPS_REPO }}
+          permission-contents: write
+
+      - name: Check out pulse-gitops
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.repository_owner }}/${{ env.GITOPS_REPO }}
+          token: ${{ steps.app-token.outputs.token }}
+          path: gitops
+          # Credentials are needed for the push below; this checkout never runs untrusted code.
+          persist-credentials: true # zizmor: ignore[artipacked]
+
+      - name: Install yq (pinned, checksum-verified)
+        run: |
+          set -euo pipefail
+          curl -fsSL -o "$RUNNER_TEMP/yq" \
+            "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
+          echo "${YQ_SHA256}  $RUNNER_TEMP/yq" | sha256sum --check --strict
+          chmod +x "$RUNNER_TEMP/yq"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: Bump prod image tag
+        working-directory: gitops
+        env:
+          TAG: ${{ needs.verify.outputs.tag }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          file=envs/prod/values.yaml
+          current="$(yq '.image.tag' "$file")"
+          if [ "$current" = "$TAG" ]; then
+            echo "prod already at $TAG; nothing to do." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          TAG="$TAG" yq -i '.image.tag = strenv(TAG)' "$file"
+          bot_id="$(gh api "/users/${APP_SLUG}%5Bbot%5D" --jq .id)"
+          git config user.name "${APP_SLUG}[bot]"
+          git config user.email "${bot_id}+${APP_SLUG}[bot]@users.noreply.github.com"
+          git add "$file"
+          git commit -m "chore(prod): deploy ${TAG}" \
+            -m "Promoted by ${ACTOR} via ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          for attempt in 1 2 3 4 5; do
+            if git push origin HEAD; then
+              echo "Promoted \`$TAG\` to prod (${current} → ${TAG})" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "Push rejected (attempt $attempt); rebasing and retrying."
+            git pull --rebase origin "$(git rev-parse --abbrev-ref HEAD)"
+            sleep $((attempt * 2))
+          done
+          echo "::error::Could not push to pulse-gitops after 5 attempts"
+          exit 1

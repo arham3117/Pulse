@@ -1,0 +1,15 @@
+# Only app/ (minus tests and caches) and the Dockerfile are needed in the build context.
+*
+!Dockerfile
+!app/pyproject.toml
+!app/uv.lock
+!app/.python-version
+!app/README.md
+!app/alembic.ini
+!app/src/**
+!app/migrations/**
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.ruff_cache
+**/.mypy_cache

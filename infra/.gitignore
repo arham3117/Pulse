@@ -1,0 +1,11 @@
+# Provider/module caches (recreated by terraform init)
+.terraform/
+# Local state (bootstrap before -migrate-state) and backups: never commit state
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+crash.log
+crash.*.log
+# Lock files ARE committed
+!.terraform.lock.hcl

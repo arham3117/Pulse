@@ -1,0 +1,65 @@
+# Dependabot: weekly updates. For GitHub Actions it bumps the commit-SHA pins and the
+# "# vX.Y.Z" comments together, so pinning never means falling behind.
+version: 2
+
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    # Let new releases age a week before proposing them (supply-chain hygiene; security
+    # updates are not delayed by cooldown).
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "chore(ci)"
+    groups:
+      actions-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: uv
+    directory: /app
+    schedule:
+      interval: weekly
+      day: monday
+    # Let new releases age a week before proposing them (supply-chain hygiene; security
+    # updates are not delayed by cooldown).
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      python-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    # Let new releases age a week before proposing them (supply-chain hygiene; security
+    # updates are not delayed by cooldown).
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "chore(docker)"
+
+  - package-ecosystem: terraform
+    directories:
+      - /infra/bootstrap
+      - /infra/envs/dev
+      - /infra/envs/prod
+      - /infra/modules/*
+    schedule:
+      interval: weekly
+      day: monday
+    # Let new releases age a week before proposing them (supply-chain hygiene; security
+    # updates are not delayed by cooldown).
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "infra"
+    groups:
+      terraform-minor-patch:
+        update-types: [minor, patch]

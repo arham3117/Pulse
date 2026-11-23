@@ -1,0 +1,14 @@
+# gitleaks config: default rules plus a narrow allowlist for known non-secrets.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known placeholders and throwaway CI-only values"
+paths = [
+  '''app/uv\.lock''',
+]
+regexes = [
+  # Local/CI-only Postgres password used by docker-compose and the app-ci service container.
+  '''PULSE_DB_PASSWORD:\s*postgres''',
+  '''POSTGRES_PASSWORD:\s*postgres''',
+]

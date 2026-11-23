@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% macro pct(v) %}{% if v is none %}–{% else %}{{ "%.2f" | format(v) }}%{% endif %}{% endmacro %}
+{% block content %}
+<div class="banner {{ banner.level }}">{{ banner.text }}</div>
+
+{% if not rows %}
+<p class="muted">No public monitors yet. Create one with <code>POST /api/v1/monitors</code>.</p>
+{% endif %}
+
+<ul class="monitors">
+  {% for row in rows %}
+  {% set m = row.m %}{% set s = row.s %}
+  <li class="monitor">
+    <div class="monitor-head">
+      <span class="dot {{ m.status }}" title="{{ m.status }}"></span>
+      <a class="name" href="/monitors/{{ m.id }}">{{ m.name }}</a>
+      <span class="status-label {{ m.status }}">{{ m.status }}</span>
+    </div>
+    <div class="bar" aria-label="last {{ s.recent | length }} checks">
+      {% for _ in range(90 - (s.recent | length)) %}<span class="tick empty"></span>{% endfor %}
+      {% for c in s.recent %}<span class="tick {{ 'ok' if c.success else 'fail' }}"
+        title="{{ c.checked_at.strftime('%Y-%m-%d %H:%M:%S') }} · {{ c.status_code or c.error_type or '' }}{% if c.response_time_ms is not none %} · {{ c.response_time_ms }} ms{% endif %}"></span>{% endfor %}
+    </div>
+    <dl class="facts">
+      <div><dt>24h</dt><dd>{{ pct(s.stats.uptime_24h) }}</dd></div>
+      <div><dt>7d</dt><dd>{{ pct(s.stats.uptime_7d) }}</dd></div>
+      <div><dt>30d</dt><dd>{{ pct(s.stats.uptime_30d) }}</dd></div>
+      <div><dt>Last response</dt><dd>{% if s.recent and s.recent[-1].response_time_ms is not none %}{{ s.recent[-1].response_time_ms }} ms{% else %}–{% endif %}</dd></div>
+      <div><dt>TLS</dt><dd class="{{ 'warn' if row.tls_days is not none and row.tls_days < 14 else '' }}">{% if row.tls_days is none %}–{% else %}{{ row.tls_days }} days{% endif %}</dd></div>
+    </dl>
+  </li>
+  {% endfor %}
+</ul>
+{% endblock %}

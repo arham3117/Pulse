@@ -1,0 +1,18 @@
+# Local Prometheus: scrapes the compose services (same job names as in Kubernetes).
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: pulse-api
+    static_configs:
+      - targets: ["api:8000"]
+  - job_name: pulse-scheduler
+    static_configs:
+      - targets: ["scheduler:9100"]
+  - job_name: pulse-worker
+    # Docker's embedded DNS returns one A record per worker replica.
+    dns_sd_configs:
+      - names: ["worker"]
+        type: A
+        port: 9100

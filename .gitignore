@@ -1,0 +1,54 @@
+# --- Separate repository (Argo CD config), lives here only for convenience ---
+pulse-gitops/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# --- Terraform ---
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraform.tfstate.lock.info
+# Keep .terraform.lock.hcl committed (provider pinning).
+# dev.tfvars / prod.tfvars are committed (no secrets in them); anything sensitive goes here:
+*.secret.tfvars
+*.auto.tfvars
+secrets.tfvars
+
+# --- Secrets / local env ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# --- Load test output ---
+loadtest/*.json
+loadtest/results/
+
+# --- Editors / OS ---
+.DS_Store
+.idea/
+.vscode/
+*.swp

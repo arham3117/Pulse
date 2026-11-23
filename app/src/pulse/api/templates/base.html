@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="refresh" content="60">
+  <title>{% block title %}Pulse status{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}">
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="/">Pulse</a>
+    <span class="muted">Uptime monitoring</span>
+  </header>
+  <main>
+    {% if stale %}
+    <div class="banner stale" role="alert">
+      Data may be stale: the newest check result is
+      {% if newest %}{{ ((now - newest).total_seconds() // 60) | int }} minutes old{% else %}missing{% endif %}.
+      Pulse itself may be degraded.
+    </div>
+    {% endif %}
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="muted">Times in UTC. Page refreshes every 60 seconds.</footer>
+</body>
+</html>
